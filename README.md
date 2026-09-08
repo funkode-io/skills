@@ -4,6 +4,7 @@ Agent skills I wrote, kept in one place so any agent can install them.
 
 | Skill | What it does |
 | --- | --- |
+| [`address-pr-review`](skills/address-pr-review) | Take a PR from "has open feedback and/or is behind upstream" to "all threads addressed and resolved, branch in sync" — without rewriting history. |
 | [`delegate-frontier`](skills/delegate-frontier) | Open a draft PR for every unblocked ticket of a spec and hand each to GitHub Copilot. |
 | [`stack-on-pr`](skills/stack-on-pr) | Same, but for the tickets a still-open PR unblocks — stacked on that PR's branch. |
 
@@ -38,10 +39,30 @@ which is why the layout here is flat `skills/<name>/` rather than the nested
 `skills/<category>/<name>/` some collections use. Installing one without the
 other leaves a dangling reference, so prefer installing the whole repo.
 
+## Migrating off the old copies
+
+`address-pr-review` previously shipped from
+[`funkode-io/replay`](https://github.com/funkode-io/replay) at
+`.github/skills/address-pr-review/SKILL.md`, which tied a repo-agnostic skill to
+one project. The copy here is the newer one: the version installed locally had
+gained a **"Triage first, then agree a plan"** step that was never pushed back to
+`replay`, so `replay`'s copy is behind.
+
+If you still have it installed from the old source, re-point it:
+
+```bash
+npx skills remove address-pr-review
+npx skills add funkode-io/skills
+```
+
+Otherwise `npx skills update` reconciles against `funkode-io/replay` and can
+overwrite the newer text with the older one.
+
 ## Layout
 
 ```
 skills/
+  address-pr-review/SKILL.md
   delegate-frontier/SKILL.md
   stack-on-pr/SKILL.md
 ```
