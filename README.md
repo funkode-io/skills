@@ -7,6 +7,7 @@ Agent skills I wrote, kept in one place so any agent can install them.
 | [`address-pr-review`](skills/address-pr-review) | Take a PR from "has open feedback and/or is behind upstream" to "all threads addressed and resolved, branch in sync" — without rewriting history. |
 | [`delegate-frontier`](skills/delegate-frontier) | Open a draft PR for every unblocked ticket of a spec and hand each to GitHub Copilot. |
 | [`stack-on-pr`](skills/stack-on-pr) | Same, but for the tickets a still-open PR unblocks — stacked on that PR's branch. |
+| [`publish-release`](skills/publish-release) | Cut a Rust workspace release: bump, tag, `cargo publish` in dependency order, and release notes with sample code for new API and a migration for every breaking change. |
 
 ## Install
 
@@ -25,7 +26,15 @@ Install a single skill instead:
 npx skills add funkode-io/skills/delegate-frontier
 ```
 
-## Why these two live together
+## Per-repo configuration
+
+`publish-release` keeps everything project-specific — the upstream slug, the ordered
+publish set, the files carrying the version, the pre-flight gate — out of the skill
+and in a `docs/agents/release.md` in the repo being released. The skill derives those
+facts and offers to write that file when it is missing. See `funkode-io/replay` for a
+worked example.
+
+## Why delegate-frontier and stack-on-pr live together
 
 `stack-on-pr` is `delegate-frontier` with two deltas — the frontier is computed
 as if the PR were merged, and branches come off the PR's head instead of the
