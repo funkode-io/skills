@@ -4,7 +4,8 @@ Agent skills I wrote, kept in one place so any agent can install them.
 
 | Skill | What it does |
 | --- | --- |
-| [`address-pr-review`](skills/address-pr-review) | Take a PR from "has open feedback and/or is behind upstream" to "all threads addressed and resolved, branch in sync" — without rewriting history. |
+| [`address-pr-review`](skills/address-pr-review) | Take a PR from "has open feedback and/or is behind upstream" to "all threads addressed and resolved, branch in sync" — without rewriting history. Interactive: you approve the plan. |
+| [`spar-with-copilot`](skills/spar-with-copilot) | Unattended agent-to-agent loop: address Copilot's review comments round after round until it recommends approval, judging every finding against the PR's original intent so the PR doesn't drift. |
 | [`delegate-frontier`](skills/delegate-frontier) | Open a draft PR for every unblocked ticket of a spec and hand each to GitHub Copilot. |
 | [`stack-on-pr`](skills/stack-on-pr) | Same, but for the tickets a still-open PR unblocks — stacked on that PR's branch. |
 | [`publish-release`](skills/publish-release) | Cut a Rust workspace release: bump, tag, `cargo publish` in dependency order, and release notes with sample code for new API and a migration for every breaking change. |
@@ -74,6 +75,7 @@ skills/
   address-pr-review/SKILL.md
   delegate-frontier/SKILL.md
   stack-on-pr/SKILL.md
+  spar-with-copilot/SKILL.md
 ```
 
 One directory per skill, each with a `SKILL.md` carrying `name` and
