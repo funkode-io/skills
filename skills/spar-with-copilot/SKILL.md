@@ -5,13 +5,22 @@ description: Spar with GitHub Copilot's PR reviewer — an unattended agent-to-a
 
 # Spar with Copilot
 
-Every push to the PR triggers a fresh Copilot review. A **round** is: wait for Copilot's review of HEAD, judge each finding against the **charter**, push one commit. Copilot is a sparring partner, not the author: it finds _something_ almost every round, and the charter is the fixed yardstick that keeps the PR the author's PR. The user steps in only at Finish.
+A **round** is: get Copilot's review of HEAD, judge each finding against the **charter**, push one commit. Copilot is a sparring partner, not the author: it finds _something_ almost every round, and the charter is the fixed yardstick that keeps the PR the author's PR. The user steps in only at Finish.
 
 ```bash
 N=$(gh pr view --json number -q .number)
 R=$(gh pr view --json url -q .url | cut -d/ -f4,5)
 BOT=copilot-pull-request-reviewer   # REST login has a "[bot]" suffix, GraphQL login does not
 ```
+
+## Setup (once per repo)
+
+Read `docs/agents/copilot-review.md` in the repo. It holds one line, `requested-by: agent` or `requested-by: github`:
+
+- **agent** — Copilot never reviews on its own. The user runs this skill once they have triaged locally, and you request every review yourself, right after each push.
+- **github** — GitHub starts each review: a ruleset reviews every push, or the user requests it. You only wait.
+
+If the file is missing, ask the user: "Should I request Copilot reviews after each push, or does GitHub (or you) start them?" Write their answer to the file and commit it on its own (`docs: record who requests Copilot reviews`) before round 1, so no later session asks again.
 
 ## 0. Write the charter (once)
 
@@ -27,17 +36,19 @@ Show the charter in your reply and carry on. Goal, In scope and Non-goals change
 
 Done when: the file holds all five sections and Goal cites its source.
 
-## 1. Wait for Copilot's review of HEAD
+## 1. Get Copilot's review of HEAD
 
 ```bash
 SHA=$(gh pr view $N --json headRefOid -q .headRefOid)
+REVIEWED=$(gh api repos/$R/pulls/$N/reviews --paginate --jq "[.[] | select(.user.login==\"$BOT[bot]\" and .commit_id==\"$SHA\")] | length")
+[ "$REVIEWED" = 0 ] && grep -q "requested-by: agent" docs/agents/copilot-review.md && gh pr edit $N --add-reviewer @copilot
 for i in $(seq 15); do
   V=$(gh api repos/$R/pulls/$N/reviews --paginate --jq ".[] | select(.user.login==\"$BOT[bot]\" and .commit_id==\"$SHA\") | .body" | grep -m1 -oE '^### (🟢|🟡|🔵).*')
   [ -n "$V" ] && break; sleep 60
 done; echo "${V:-none}"
 ```
 
-Verdicts: `🟢 Approval recommended`, `🟡 Changes recommended`, `🔵 Needs a closer look`. Reviews have landed anywhere from 8 minutes to hours after a push. If none after 15 minutes: `gh pr edit $N --add-reviewer @copilot`, poll another 15, then go to Finish reporting "no Copilot review for `<sha>`".
+Verdicts: `🟢 Approval recommended`, `🟡 Changes recommended`, `🔵 Needs a closer look`. Reviews have landed anywhere from 8 minutes to hours after a push. If none after 15 minutes, do not request it again or keep polling: go to Finish reporting "no Copilot review for `<sha>`" and ask the user to check the PR on GitHub.
 
 ## 2. Triage every unresolved Copilot thread
 
