@@ -35,6 +35,8 @@ and in a `docs/agents/release.md` in the repo being released. The skill derives 
 facts and offers to write that file when it is missing. See `funkode-io/replay` for a
 worked example.
 
+`spar-with-copilot` keeps who requests Copilot reviews — the agent after each push, or GitHub and you — in a `docs/agents/copilot-review.md`. It asks the first time it runs in a repo and writes the answer there.
+
 ## Why delegate-frontier and stack-on-pr live together
 
 `stack-on-pr` is `delegate-frontier` with two deltas — the frontier is computed
