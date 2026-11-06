@@ -25,7 +25,7 @@ digest replaces the *exploratory* reading of README, CONTEXT.md and `docs/adr/`.
 | `README.md` | One line per `##` and `###` heading: anchor and when a worker needs it. |
 | `docs/agents/*.md` | One line per file: what per-repo fact it configures. |
 | `Cargo.toml`, `*/src/lib.rs`, `tests/` | The crate and module map with file sizes, and where tests live. |
-| Settings tables in README | Every tunable: env var, builder method, default. |
+| Settings tables in README | Every tunable: env var, builder method, default. The script finds them by the repo's env-var prefix, declared in `docs/agents/domain.md` as `Env var prefix:` followed by the prefix in backticks, or passed with `--env-prefix`. |
 
 Output: `docs/agents/context-digest.md`, committed, with a header line recording the
 git commit and the source fingerprint it was built from.
