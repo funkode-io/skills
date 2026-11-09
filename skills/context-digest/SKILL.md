@@ -52,7 +52,9 @@ git commit and the source fingerprint it was built from.
    that bite a worker: wrong `gh` repo, broken links, duplicate ADR numbers, a floor
    that is a feature floor, a migration that is not online. Each trap names its source.
 4. **Check** with `scripts/digest_check.py check <repo> <digest>`. It fails when any
-   inventory item is missing from the digest, when a pointer names a file or anchor
+   inventory item is missing from the digest (a glossary term needs an entry of its own,
+   a `- [Term](...)` or `- **Term**` line, not a passing mention; an ADR is cited by file
+   name, because numbers repeat), when a pointer names a file or anchor
    that does not exist, when the fingerprint in the header is stale, or when the digest
    is over budget (default 8,000 tokens; set `--budget`).
 5. **Sample-verify** five ADR lines and five glossary lines by reading the source
