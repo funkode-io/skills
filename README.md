@@ -8,6 +8,7 @@ Agent skills I wrote, kept in one place so any agent can install them.
 | [`spar-with-copilot`](skills/spar-with-copilot) | Unattended agent-to-agent loop: address Copilot's review comments round after round until it recommends approval, judging every finding against the PR's original intent so the PR doesn't drift. |
 | [`delegate-frontier`](skills/delegate-frontier) | Open a draft PR for every unblocked ticket of a spec and hand each to GitHub Copilot. |
 | [`stack-on-pr`](skills/stack-on-pr) | Same, but for the tickets a still-open PR unblocks — stacked on that PR's branch. |
+| [`context-digest`](skills/context-digest) | Build or refresh `docs/agents/context-digest.md`, a map of a repo's agent context (glossary, ADRs, README sections, tunables) that a worker reads instead of the full docs, with a check script that fails CI when it goes stale. |
 | [`publish-release`](skills/publish-release) | Cut a Rust workspace release: bump, tag, `cargo publish` in dependency order, and release notes with sample code for new API and a migration for every breaking change. |
 
 ## Install
@@ -34,6 +35,8 @@ publish set, the files carrying the version, the pre-flight gate — out of the 
 and in a `docs/agents/release.md` in the repo being released. The skill derives those
 facts and offers to write that file when it is missing. See `funkode-io/replay` for a
 worked example.
+
+`context-digest` writes `docs/agents/context-digest.md` and reads `AGENTS.md`, `CONTEXT.md`, `README.md`, `docs/adr/` and `docs/agents/`; its check script is copied into the repo's `scripts/` so the pre-commit hook and CI can run it.
 
 `spar-with-copilot` keeps who requests Copilot reviews — the agent after each push, or GitHub and you — in a `docs/agents/copilot-review.md`. It asks the first time it runs in a repo and writes the answer there.
 
@@ -75,6 +78,8 @@ overwrite the newer text with the older one.
 ```
 skills/
   address-pr-review/SKILL.md
+  context-digest/SKILL.md
+  context-digest/scripts/digest_check.py
   delegate-frontier/SKILL.md
   stack-on-pr/SKILL.md
   spar-with-copilot/SKILL.md
