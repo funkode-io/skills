@@ -9,6 +9,7 @@ Agent skills I wrote, kept in one place so any agent can install them.
 | [`delegate-frontier`](skills/delegate-frontier) | Open a draft PR for every unblocked ticket of a spec and hand each to GitHub Copilot. |
 | [`stack-on-pr`](skills/stack-on-pr) | Same, but for the tickets a still-open PR unblocks — stacked on that PR's branch. |
 | [`publish-release`](skills/publish-release) | Cut a Rust workspace release: bump, tag, `cargo publish` in dependency order, and release notes with sample code for new API and a migration for every breaking change. |
+| [`rules-review`](skills/rules-review) | Keep rules and memory lean: ask four questions of every rule (discoverable? already known? shorter? lasting idea or steps?) and propose deletions and rewrites for the owner to approve. |
 
 ## Install
 
