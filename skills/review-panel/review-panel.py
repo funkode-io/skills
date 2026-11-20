@@ -112,7 +112,10 @@ def load_ledger(path):
     if not os.path.exists(path):
         return {"round": 0, "declined": []}
     with open(path) as f:
-        return json.load(f)
+        ledger = json.load(f)
+    ledger.setdefault("round", 0)
+    ledger.setdefault("declined", [])
+    return ledger
 
 
 def save_ledger(path, ledger):
@@ -402,6 +405,7 @@ def build_jobs(a, f, issue_path, work, declined):
             job["system"] += "\n\nApproved prototype: %s\nScreenshots of the change: %s" % (
                 os.path.abspath(a.prototype), a.screenshots or "none given; say so as attention")
         jobs.append(job)
+    seen = set()
     if "rules" in a.reviewers:
         topics = f["rule_topics"] + [{"topic": os.path.basename(t), "rules": [t], "references": [],
                                       "files": f["scope"]} for t in a.topics]
@@ -409,8 +413,13 @@ def build_jobs(a, f, issue_path, work, declined):
             in_scope = [x for x in t["files"] if x in f["scope"]]
             if not in_scope:
                 continue
+            slug = "rules-" + re.sub(r"[^a-z0-9-]+", "-", t["topic"].lower())
+            name, n = slug, 2
+            while name in seen:
+                name, n = "%s-%d" % (slug, n), n + 1
+            seen.add(name)
             jobs.append({
-                "name": "rules-" + re.sub(r"[^a-z0-9-]+", "-", t["topic"].lower()),
+                "name": name,
                 "effort": effort, "schema": REVIEWER_SCHEMA, "cwd": ro,
                 "system": ctx + "\n\n" + prompt_file("rules") + "\n\nYour topic: %s.\nRule files: "
                 "%s.\nReference (read when a rule points there): %s.\nChanged files this topic "
@@ -487,6 +496,8 @@ def cmd_run(a):
         print("### 🔵 Needs a closer look\n\nRound %d done without convergence; the owner decides "
               "whether to continue (rerun with --force)." % MAX_ROUND)
         return 3
+    if not f["scope"] and a.force:
+        f["scope"] = f["files"]
     if not f["scope"]:
         die("nothing in scope: no file's own change moved since round %d" % ledger["round"])
     token = "" if a.dry_run else read_token(a.token_file)
