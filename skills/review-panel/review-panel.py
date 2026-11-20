@@ -165,10 +165,19 @@ def apply_to(text):
     m = re.match(r"---\n(.*?)\n---", text, re.S)
     if not m:
         return None
-    for line in m.group(1).splitlines():
+    lines = m.group(1).splitlines()
+    for i, line in enumerate(lines):
         if line.strip().startswith("applyTo:"):
-            value = line.split(":", 1)[1].strip().strip("'\"")
-            return [g for g in value.split(",") if g.strip()]
+            value = line.split(":", 1)[1].strip()
+            if value:  # one line: "a,b" or ["a", "b"]
+                value = value.strip("[]")
+                return [g.strip().strip("'\"") for g in value.split(",") if g.strip()]
+            globs = []  # YAML list on the following lines
+            for item in lines[i + 1:]:
+                if not item.strip().startswith("-"):
+                    break
+                globs.append(item.strip()[1:].strip().strip("'\""))
+            return globs or None
     return None
 
 
@@ -351,7 +360,7 @@ def parse(raw):
     out = env.get("structured_output") if isinstance(env, dict) else None
     if out is None and isinstance(env, dict):
         text = env.get("result", "")
-        blocks = re.findall(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.S)
+        blocks = re.findall(r"```(?:json)?\s*\n(.*?)\n\s*```", text, re.S)
         for cand in reversed(blocks or [text]):
             try:
                 out = json.loads(cand)
@@ -472,6 +481,8 @@ def render(f, colour, checked, timings):
 
 
 def cmd_run(a):
+    if a.parallel < 1:
+        die("--parallel must be at least 1")
     if a.implementer_model and a.implementer_model == a.model:
         die("reviewer model must differ from the implementer's (%s)" % a.model)
     if a.prototype and not os.path.isfile(a.prototype):
@@ -513,10 +524,16 @@ def cmd_run(a):
         issue_path = None
         if a.issue:
             issue_path = os.path.join(a.inputs, "issue.md")
-            iss = json.loads(subprocess.run(
-                ["gh", "issue", "view", a.issue, "--json", "title,body"] + (
+            try:
+                r = subprocess.run(["gh", "issue", "view", a.issue, "--json", "title,body"] + (
                     ["-R", a.issue_repo] if a.issue_repo else []),
-                cwd=a.repo, capture_output=True, text=True, check=True).stdout)
+                    cwd=a.repo, capture_output=True, text=True)
+            except FileNotFoundError:
+                die("--issue needs the gh CLI on PATH")
+            if r.returncode != 0:
+                die("gh issue view %s: %s (check `gh auth status` and --issue-repo)" % (
+                    a.issue, r.stderr.strip()))
+            iss = json.loads(r.stdout)
             with open(issue_path, "w") as fh:
                 fh.write("# %s\n\n%s\n" % (iss["title"], iss["body"]))
         jobs = build_jobs(a, f, issue_path, work, ledger.get("declined", []))
