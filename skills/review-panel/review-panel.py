@@ -316,9 +316,8 @@ def run_claude(job, a, token, work):
     argv = ["claude", "-p", "--no-session-persistence", "--setting-sources", "",
             "--strict-mcp-config", "--model", a.model, "--effort", job["effort"],
             "--permission-mode", "dontAsk", "--output-format", "json",
-            "--tools", ",".join(sorted({t.split("(")[0] for t in tools} | ({"Agent"} if job.get(
-                "agents") else set()))),
-            "--allowedTools", *tools, *(["Agent"] if job.get("agents") else []),
+            "--tools", ",".join(sorted({t.split("(")[0] for t in tools})),
+            "--allowedTools", *tools,
             "--json-schema", json.dumps(job["schema"]),
             "--append-system-prompt", job["system"]]
     for d in [a.inputs] + job.get("add_dirs", []):
@@ -393,10 +392,6 @@ def build_jobs(a, f, issue_path, work, declined):
         job = {"name": name, "effort": effort, "schema": REVIEWER_SCHEMA, "cwd": ro,
                "system": ctx + "\n\n" + prompt_file(name),
                "prompt": "Review the change as your brief says and answer in the JSON schema."}
-        if name == "correctness":
-            # Bundled local review command over the diff range, read-only.
-            job["prompt"] = "%s %s origin/%s...HEAD" % (a.correctness_command, effort, f["base"])
-            job["agents"] = True
         if name == "attacker":
             job["cwd"] = scratch_copy(a.repo, os.path.join(work, "attack"), f["head"], f["base"],
                                       f["base_sha"])
@@ -591,7 +586,6 @@ def main():
     r.add_argument("--prototype", help="approved prototype HTML; enables ui")
     r.add_argument("--screenshots", help="directory of screenshots of the change, for ui")
     r.add_argument("--token-file", default=TOKEN_FILE)
-    r.add_argument("--correctness-command", default="/code-review")
     r.add_argument("--out", help="directory for raw outputs and report.md")
     r.add_argument("--timeout", type=int, default=1800, help="seconds per session")
     r.add_argument("--parallel", type=int, default=4)

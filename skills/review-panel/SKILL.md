@@ -49,12 +49,13 @@ python3 $PANEL run --repo . --ledger $LEDGER --model <reviewer model> --implemen
   --reviewers correctness,attacker,spec,rules --issue <N> --out <scratch dir>
 ```
 
-The reviewer model differs from the one that wrote the change. The script picks the depth: rounds 1-2 review the whole diff at high effort; round 3 on, and any round after a pure main merge, review only files whose own change moved, blocking findings only. Exit 2 means a session failed: rerun, the ledger is untouched.
+The reviewer model differs from the one that wrote the change. The script picks the depth: rounds 1-2 review the whole diff at high effort; round 3 on reviews only files whose own change moved, blocking findings only. After a main merge, only files whose own change moved are reviewed, in any round. Exit 2 means a session failed: rerun, the ledger is untouched.
 
 ## 4. Act on the verdict
 
 - 🟢: done.
 - 🟡 / 🔴: fix each finding, or decline it with `python3 $PANEL decline --ledger $LEDGER "<title>"` and a reason in the PR thread; reviewers re-raise a declined title only with new evidence. Commit, push, go back to step 1.
+  Reviewers never see the PR body, so a decision made after the issue was written reads as a spec deviation: decline it, citing where the decision is recorded.
 - 🔵: report the named areas to the owner and stop.
 - **Pre-existing bugs**: `easy` ones you fix in this PR with a note in the PR body; for `hard` ones propose a follow-up issue.
 
