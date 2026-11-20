@@ -176,7 +176,7 @@ def apply_to(text):
             for item in lines[i + 1:]:
                 if not item.strip().startswith("-"):
                     break
-                globs.append(item.strip()[1:].strip().strip("'\""))
+                globs.append(re.sub(r"\s+#.*$", "", item.strip()[1:].strip()).strip("'\""))
             return globs or None
     return None
 
@@ -318,6 +318,27 @@ def isolated_env(token, config_dir):
 READ_ONLY = ["Read", "Grep", "Glob", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)",
              "Bash(git blame:*)", "Bash(git grep:*)"]
 EXEC = ["Read", "Grep", "Glob", "Bash", "Edit", "Write"]
+# Exec sessions run Bash in Claude Code's sandbox: writes stay in the clone and toolchain caches,
+# network only to package registries, and the token's directory is unreadable.
+CACHES = ["~/.cargo", "~/.rustup", "~/.npm", "~/.cache", "~/go", "~/.gradle", "~/.m2",
+          "~/Library/Caches"]
+REGISTRIES = ["crates.io", "index.crates.io", "static.crates.io", "static.rust-lang.org",
+              "registry.npmjs.org", "pypi.org", "files.pythonhosted.org", "proxy.golang.org",
+              "sum.golang.org", "repo.maven.apache.org", "github.com", "codeload.github.com",
+              "objects.githubusercontent.com"]
+
+
+def sandbox_settings(a):
+    secret = os.path.dirname(os.path.abspath(a.token_file))
+    caches = [os.path.expanduser(c) for c in CACHES if os.path.isdir(os.path.expanduser(c))]
+    return json.dumps({
+        "sandbox": {"enabled": True, "failIfUnavailable": True, "autoAllowBashIfSandboxed": True,
+                    "allowUnsandboxedCommands": False,
+                    "filesystem": {"denyRead": [secret, os.path.expanduser("~/.claude")],
+                                   "allowWrite": caches},
+                    "network": {"allowedDomains": REGISTRIES + a.allow_domain}},
+        "permissions": {"deny": ["Read(/%s/**)" % secret, "Edit(/%s/**)" % secret]},
+    })
 
 
 def run_claude(job, a, token, work):
@@ -332,6 +353,8 @@ def run_claude(job, a, token, work):
             "--allowedTools", *tools,
             "--json-schema", json.dumps(job["schema"]),
             "--append-system-prompt", job["system"]]
+    if tools is EXEC:
+        argv += ["--settings", sandbox_settings(a)]
     for d in [a.inputs] + job.get("add_dirs", []):
         argv += ["--add-dir", d]
     log = os.path.join(a.out, name + ".json")
@@ -483,7 +506,9 @@ def render(f, colour, checked, timings):
 def cmd_run(a):
     if a.parallel < 1:
         die("--parallel must be at least 1")
-    if a.implementer_model and a.implementer_model == a.model:
+    if not a.implementer_model:
+        die("--implementer-model is required: the reviewer model must differ from it")
+    if a.implementer_model == a.model:
         die("reviewer model must differ from the implementer's (%s)" % a.model)
     if a.prototype and not os.path.isfile(a.prototype):
         die("prototype not found: %s" % a.prototype)
@@ -606,7 +631,7 @@ def main():
                    help="comma list; correctness and attacker are always added")
     r.add_argument("--model", default=os.environ.get("REVIEW_PANEL_MODEL"), required=not os.environ.get(
         "REVIEW_PANEL_MODEL"), help="reviewer model (env REVIEW_PANEL_MODEL)")
-    r.add_argument("--implementer-model", help="refuse to run when it equals --model")
+    r.add_argument("--implementer-model", help="the model that wrote the change; must differ")
     r.add_argument("--issue", help="linked issue number or URL; enables spec")
     r.add_argument("--issue-repo", help="owner/repo when --issue is a bare number of another repo")
     r.add_argument("--topics", nargs="*", default=[],
@@ -615,6 +640,8 @@ def main():
     r.add_argument("--screenshots", help="directory of screenshots of the change, for ui")
     r.add_argument("--token-file", default=TOKEN_FILE)
     r.add_argument("--out", help="directory for raw outputs and report.md")
+    r.add_argument("--allow-domain", nargs="*", default=[],
+                   help="extra hosts the attacker and checker may reach (registries are allowed)")
     r.add_argument("--timeout", type=int, default=1800, help="seconds per session")
     r.add_argument("--parallel", type=int, default=4)
     r.add_argument("--force", action="store_true", help="review an unchanged patch-id or round 6+")
