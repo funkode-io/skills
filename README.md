@@ -6,6 +6,7 @@ Agent skills I wrote, kept in one place so any agent can install them.
 | --- | --- |
 | [`address-pr-review`](skills/address-pr-review) | Take a PR from "has open feedback and/or is behind upstream" to "all threads addressed and resolved, branch in sync" — without rewriting history. Interactive: you approve the plan. |
 | [`spar-with-copilot`](skills/spar-with-copilot) | Unattended agent-to-agent loop: address Copilot's review comments round after round until it recommends approval, judging every finding against the PR's original intent so the PR doesn't drift. |
+| [`review-panel`](skills/review-panel) | Local PR review by a panel of isolated Claude reviewers (correctness, attacker, spec, security, data, UI, repo rules) in parallel fresh sessions, then a checker that keeps only proven findings; ends in a Copilot-style verdict. |
 | [`delegate-frontier`](skills/delegate-frontier) | Open a draft PR for every unblocked ticket of a spec and hand each to GitHub Copilot. |
 | [`stack-on-pr`](skills/stack-on-pr) | Same, but for the tickets a still-open PR unblocks — stacked on that PR's branch. |
 | [`publish-release`](skills/publish-release) | Cut a Rust workspace release: bump, tag, `cargo publish` in dependency order, and release notes with sample code for new API and a migration for every breaking change. |
@@ -35,6 +36,8 @@ publish set, the files carrying the version, the pre-flight gate — out of the 
 and in a `docs/agents/release.md` in the repo being released. The skill derives those
 facts and offers to write that file when it is missing. See `funkode-io/replay` for a
 worked example.
+
+`review-panel` reads a 0600 token file (`~/.config/review-panel/oauth-token`, from `claude setup-token`) so reviewers run on the subscription outside your session, and keeps each PR's round, patch-id and declined findings in a ledger file the caller passes.
 
 `spar-with-copilot` keeps who requests Copilot reviews — the agent after each push, or GitHub and you — in a `docs/agents/copilot-review.md`. It asks the first time it runs in a repo and writes the answer there.
 
@@ -79,6 +82,7 @@ skills/
   delegate-frontier/SKILL.md
   stack-on-pr/SKILL.md
   spar-with-copilot/SKILL.md
+  review-panel/SKILL.md, review-panel.py, reviewers/*.md
 ```
 
 One directory per skill, each with a `SKILL.md` carrying `name` and
