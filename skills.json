@@ -1,0 +1,20 @@
+{
+  "mattpocock/skills": [
+    "domain-modeling",
+    "grill-with-docs",
+    "grilling",
+    "pr",
+    "research",
+    "wizard",
+    "writing-for-agents"
+  ],
+  "funkode-io/skills": [
+    "implement-frontier",
+    "publish-release",
+    "review-panel",
+    "rules-review"
+  ],
+  "agavra/tuicr": [
+    "tuicr"
+  ]
+}

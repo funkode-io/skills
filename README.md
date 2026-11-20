@@ -7,6 +7,7 @@ Agent skills I wrote, kept in one place so any agent can install them.
 | [`address-pr-review`](skills/address-pr-review) | Take a PR from "has open feedback and/or is behind upstream" to "all threads addressed and resolved, branch in sync" — without rewriting history. Interactive: you approve the plan. |
 | [`spar-with-copilot`](skills/spar-with-copilot) | Unattended agent-to-agent loop: address Copilot's review comments round after round until it recommends approval, judging every finding against the PR's original intent so the PR doesn't drift. |
 | [`review-panel`](skills/review-panel) | Local PR review by a panel of isolated Claude reviewers (correctness, attacker, spec, security, data, UI, repo rules) in parallel fresh sessions, then a checker that keeps only proven findings; ends in a Copilot-style verdict. |
+| [`implement-frontier`](skills/implement-frontier) | Start every issue of a spec that can be implemented now, and decide which blocked issues may start stacked on their blocker's branch. |
 | [`delegate-frontier`](skills/delegate-frontier) | Open a draft PR for every unblocked ticket of a spec and hand each to GitHub Copilot. |
 | [`stack-on-pr`](skills/stack-on-pr) | Same, but for the tickets a still-open PR unblocks — stacked on that PR's branch. |
 | [`publish-release`](skills/publish-release) | Cut a Rust workspace release: bump, tag, `cargo publish` in dependency order, and release notes with sample code for new API and a migration for every breaking change. |
@@ -28,6 +29,27 @@ Install a single skill instead:
 ```bash
 npx skills add funkode-io/skills/delegate-frontier
 ```
+
+## My skill set
+
+[`skills.json`](skills.json) lists the skills I keep installed globally, from this
+repo and others, grouped by source repo.
+
+```bash
+npx -y github:funkode-io/skills install                 # new machine: add every listed skill globally
+npx -y github:funkode-io/skills install --agent claude-code pi   # choose agents (default: the CLI's last selection or detected)
+npx -y github:funkode-io/skills install --dry-run       # print the `npx skills` commands only
+npx -y github:funkode-io/skills install --prune         # also remove global skills not on the list
+npx skills update -g                                    # update installed skills to upstream
+npx -y github:funkode-io/skills check                   # read-only: what is outdated, missing or unlisted
+```
+
+`install` runs `npx skills add <source> -g -y -s <names>` per source, so rerunning
+it is safe. `check` compares each global skill's `skillFolderHash` in the lock with
+its folder's current tree sha on GitHub; it prints nothing and exits 0 when all is
+current, prints one line per finding and exits 1 otherwise, and exits 2 on a
+network or API error. It authenticates with `GITHUB_TOKEN`, `GH_TOKEN` or
+`gh auth token` when available.
 
 ## Per-repo configuration
 
@@ -80,9 +102,12 @@ overwrite the newer text with the older one.
 skills/
   address-pr-review/SKILL.md
   delegate-frontier/SKILL.md
+  implement-frontier/SKILL.md
   stack-on-pr/SKILL.md
   spar-with-copilot/SKILL.md
   review-panel/SKILL.md, review-panel.py, reviewers/*.md
+skills.json                 my global skill set
+bin/funkode-skills.mjs      install / check for skills.json
 ```
 
 One directory per skill, each with a `SKILL.md` carrying `name` and
