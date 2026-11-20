@@ -1,0 +1,17 @@
+{
+  "name": "funkode-skills",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Install and check the skills listed in skills.json",
+  "type": "module",
+  "bin": {
+    "funkode-skills": "bin/funkode-skills.mjs"
+  },
+  "files": [
+    "bin",
+    "skills.json"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
+}
