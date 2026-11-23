@@ -17,7 +17,6 @@ import json
 import os
 import re
 import shutil
-import stat
 import subprocess
 import sys
 import tempfile
@@ -45,8 +44,6 @@ HINTS = {
 RULE_FILES = ["AGENTS.md", "CLAUDE.md", ".github/copilot-instructions.md"]
 REFERENCE_GLOBS = ["GLOSSARY.md", "CONTEXT.md", "docs/adr/*.md", "docs/adrs/*.md", "adr/*.md",
                    "docs/decisions/*.md"]
-TOKEN_FILE = os.path.expanduser(os.environ.get("REVIEW_PANEL_TOKEN_FILE",
-                                               "~/.config/review-panel/oauth-token"))
 
 FINDING = {
     "type": "object",
@@ -281,20 +278,6 @@ def cmd_decline(a):
     save_ledger(a.ledger, ledger)
 
 
-def read_token(path):
-    try:
-        st = os.stat(path)
-    except FileNotFoundError:
-        die("no token file at %s: run `claude setup-token`, save the token there, chmod 600" % path)
-    if st.st_mode & (stat.S_IRWXG | stat.S_IRWXO):
-        die("token file %s must be mode 0600" % path)
-    with open(path) as fh:
-        tok = fh.read().strip()
-    if not tok:
-        die("token file %s is empty" % path)
-    return tok
-
-
 def scratch_copy(repo, dest, head, base, base_sha):
     """A throwaway clone at HEAD: no untracked files, no worker notes, no session state."""
     subprocess.run(["git", "clone", "-q", "--shared", "--no-checkout", repo, dest], check=True)
@@ -303,12 +286,17 @@ def scratch_copy(repo, dest, head, base, base_sha):
     return dest
 
 
-def isolated_env(token, config_dir):
+def login_dir():
+    return os.path.abspath(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude"))
+
+
+def isolated_env():
+    """The caller's Claude login and nothing else of its environment."""
     keep = ("PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "LC_ALL", "TERM", "TMPDIR")
     env = {k: os.environ[k] for k in keep if k in os.environ}
+    if os.environ.get("CLAUDE_CONFIG_DIR"):
+        env["CLAUDE_CONFIG_DIR"] = login_dir()
     env.update({
-        "CLAUDE_CONFIG_DIR": config_dir,
-        "CLAUDE_CODE_OAUTH_TOKEN": token,
         "CLAUDE_CODE_DISABLE_CLAUDE_MDS": "1",
         "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1",
     })
@@ -319,7 +307,7 @@ READ_ONLY = ["Read", "Grep", "Glob", "Bash(git diff:*)", "Bash(git log:*)", "Bas
              "Bash(git blame:*)", "Bash(git grep:*)"]
 EXEC = ["Read", "Grep", "Glob", "Bash", "Edit", "Write"]
 # Exec sessions run Bash in Claude Code's sandbox: writes stay in the clone and toolchain caches,
-# network only to package registries, and the token's directory is unreadable.
+# network only to package registries, and the Claude login directory is unreadable.
 CACHES = ["~/.cargo", "~/.rustup", "~/.npm", "~/.cache", "~/go", "~/.gradle", "~/.m2",
           "~/Library/Caches"]
 REGISTRIES = ["crates.io", "index.crates.io", "static.crates.io", "static.rust-lang.org",
@@ -328,23 +316,27 @@ REGISTRIES = ["crates.io", "index.crates.io", "static.crates.io", "static.rust-l
               "objects.githubusercontent.com"]
 
 
-def sandbox_settings(a):
-    secret = os.path.dirname(os.path.abspath(a.token_file))
-    caches = [os.path.expanduser(c) for c in CACHES if os.path.isdir(os.path.expanduser(c))]
-    return json.dumps({
-        "sandbox": {"enabled": True, "failIfUnavailable": True, "autoAllowBashIfSandboxed": True,
-                    "allowUnsandboxedCommands": False,
-                    "filesystem": {"denyRead": [secret, os.path.expanduser("~/.claude")],
-                                   "allowWrite": caches},
-                    "network": {"allowedDomains": REGISTRIES + a.allow_domain}},
-        "permissions": {"deny": ["Read(/%s/**)" % secret, "Edit(/%s/**)" % secret]},
-    })
+def session_settings(a, sandboxed):
+    """Deny the Claude login to every session's file tools; exec sessions also sandbox Bash.
+
+    Read-only sessions run their git commands unsandboxed, and `git blame --contents <file>` or a
+    command substitution in a path still reads any file: sandboxing them too is the open fix.
+    """
+    login = login_dir()
+    settings = {"permissions": {"deny": ["Read(/%s/**)" % login, "Edit(/%s/**)" % login]}}
+    if sandboxed:
+        caches = [os.path.expanduser(c) for c in CACHES if os.path.isdir(os.path.expanduser(c))]
+        settings["sandbox"] = {
+            "enabled": True, "failIfUnavailable": True, "autoAllowBashIfSandboxed": True,
+            "allowUnsandboxedCommands": False,
+            "filesystem": {"denyRead": [login], "allowWrite": caches},
+            "network": {"allowedDomains": REGISTRIES + a.allow_domain}}
+    return json.dumps(settings)
 
 
-def run_claude(job, a, token, work):
+def run_claude(job, a):
     """One fresh `claude -p` process; returns (name, parsed JSON or None, error, seconds)."""
     name = job["name"]
-    cfg = tempfile.mkdtemp(prefix="cfg-", dir=work)
     tools = job.get("tools", READ_ONLY)
     argv = ["claude", "-p", "--no-session-persistence", "--setting-sources", "",
             "--strict-mcp-config", "--model", a.model, "--effort", job["effort"],
@@ -352,16 +344,15 @@ def run_claude(job, a, token, work):
             "--tools", ",".join(sorted({t.split("(")[0] for t in tools})),
             "--allowedTools", *tools,
             "--json-schema", json.dumps(job["schema"]),
-            "--append-system-prompt", job["system"]]
-    if tools is EXEC:
-        argv += ["--settings", sandbox_settings(a)]
+            "--append-system-prompt", job["system"],
+            "--settings", session_settings(a, tools is EXEC)]
     for d in [a.inputs] + job.get("add_dirs", []):
         argv += ["--add-dir", d]
     log = os.path.join(a.out, name + ".json")
     start = time.time()
     try:
         # The prompt goes on stdin: a positional after variadic --add-dir would be read as a dir.
-        r = subprocess.run(argv, cwd=job["cwd"], env=isolated_env(token, cfg), input=job["prompt"],
+        r = subprocess.run(argv, cwd=job["cwd"], env=isolated_env(), input=job["prompt"],
                            capture_output=True, text=True, timeout=a.timeout)
         raw = r.stdout
         err = r.stderr if r.returncode else ""
@@ -369,8 +360,18 @@ def run_claude(job, a, token, work):
         raw, err = "", "timeout after %ss" % a.timeout
     with open(log, "w") as fh:
         fh.write(raw or err)
-    shutil.rmtree(cfg, ignore_errors=True)
-    return name, parse(raw), err, round(time.time() - start)
+    return name, parse(raw), err or failure(raw), round(time.time() - start)
+
+
+def failure(raw):
+    """What claude said went wrong (not logged in, usage limit) when it exits 0 with an error."""
+    try:
+        env = json.loads(raw)
+    except (ValueError, TypeError):
+        return ""
+    if not (isinstance(env, dict) and env.get("is_error")):
+        return ""
+    return str(env.get("result") or "claude reported an error")
 
 
 def parse(raw):
@@ -536,7 +537,6 @@ def cmd_run(a):
         f["scope"] = f["files"]
     if not f["scope"]:
         die("nothing in scope: no file's own change moved since round %d" % ledger["round"])
-    token = "" if a.dry_run else read_token(a.token_file)
     a.out = os.path.abspath(a.out or tempfile.mkdtemp(prefix="review-panel-"))
     # Reviewers see only the inputs dir; a.out also holds the other reviewers' answers.
     a.inputs = os.path.join(a.out, "inputs")
@@ -572,7 +572,7 @@ def cmd_run(a):
             return 0
         results, timings, failed = {}, [], []
         with concurrent.futures.ThreadPoolExecutor(max_workers=a.parallel) as pool:
-            for name, out, err, secs in pool.map(lambda j: run_claude(j, a, token, work), jobs):
+            for name, out, err, secs in pool.map(lambda j: run_claude(j, a), jobs):
                 timings.append((name, secs))
                 if out is None:
                     failed.append("%s (%s)" % (name, (err or "unparseable output").strip()[:200]))
@@ -595,7 +595,7 @@ def cmd_run(a):
                  + os.path.join(panel, "panel.json"), "add_dirs": [panel],
                  "prompt": "Check the panel's findings as your brief says and answer in the JSON "
                            "schema."}
-        name, checked, err, secs = run_claude(check, a, token, work)
+        name, checked, err, secs = run_claude(check, a)
         timings.append((name, secs))
         if checked is None:
             print("### ⚠ Panel incomplete\n\nNo verdict; ledger untouched. Checker failed: %s. Raw "
@@ -638,7 +638,6 @@ def main():
                    help="extra rule files the assessment found that paths cannot show")
     r.add_argument("--prototype", help="approved prototype HTML; enables ui")
     r.add_argument("--screenshots", help="directory of screenshots of the change, for ui")
-    r.add_argument("--token-file", default=TOKEN_FILE)
     r.add_argument("--out", help="directory for raw outputs and report.md")
     r.add_argument("--allow-domain", nargs="*", default=[],
                    help="extra hosts the attacker and checker may reach (registries are allowed)")

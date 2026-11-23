@@ -59,7 +59,7 @@ and in a `docs/agents/release.md` in the repo being released. The skill derives 
 facts and offers to write that file when it is missing. See `funkode-io/replay` for a
 worked example.
 
-`review-panel` reads a 0600 token file (`~/.config/review-panel/oauth-token`, from `claude setup-token`) so reviewers run on the subscription outside your session, and keeps each PR's round, patch-id and declined findings in a ledger file the caller passes.
+`review-panel` runs its reviewers on your existing Claude login, stripped of your settings, rules and memory, and keeps each PR's round, patch-id and declined findings in a ledger file the caller passes.
 
 `spar-with-copilot` keeps who requests Copilot reviews — the agent after each push, or GitHub and you — in a `docs/agents/copilot-review.md`. It asks the first time it runs in a repo and writes the answer there.
 
