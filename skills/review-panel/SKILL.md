@@ -19,7 +19,7 @@ LEDGER=$(git rev-parse --git-dir)/review-panel-<PR number>.json
 
 ## Setup (once per machine)
 
-Reviewers authenticate with the subscription token, not your session. If `~/.config/review-panel/oauth-token` is missing, ask the user to run `claude setup-token`, save the token there and `chmod 600` it (or pass `--token-file`). Never print the token.
+Reviewers run on the Claude login of whoever runs the panel (`claude` must be logged in with `/login`; an API key or token in the environment is not passed on), with none of that user's settings, rules, memory, skills or MCP servers. The attacker and checker run commands in Claude Code's sandbox, which on Linux needs `bubblewrap` and `socat`; without them those two sessions refuse to start.
 
 ## 1. Plan
 
