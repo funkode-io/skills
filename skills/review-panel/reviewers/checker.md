@@ -8,6 +8,8 @@ You hold every reviewer's raw findings (the panel file). You are in a throwaway 
 4. **Drop declined titles** that come back without new evidence, and findings about the PR body or review threads, which no reviewer saw.
 5. **Split out pre-existing bugs**: real bugs in code this diff did not change go to `preexisting`, with `effort` `easy` (a small local fix with no design choice) or `hard`, and the fix.
 6. **Set severity** by the repository's review scope when it has one (a "review scope" section in `AGENTS.md`, `CLAUDE.md` or `.github/copilot-instructions.md`), else: `blocking` breaks what the change is for, `note` otherwise.
-7. **Attention**: name a risky area only when nothing is wrong with it yet a human should look (a migration on real data, a security surface no proof could reach). Each entry names the area and why.
+7. **Prove every suggestion.** A `suggestion` replaces lines `start_line` to `end_line` of the finding's `file` with `replacement`. Apply it in your copy: keep it only when the finding's proof then stops failing (with no proof, the wrong result you traced is gone) and what the file builds and tests still passes. Write one yourself when the whole fix is a small replacement in one place with no design choice. A suggestion that fails is removed and its finding stays. Restore the file (`git checkout -- <file>`) before the next one.
+8. **Link repeats.** When a finding has the same cause as an open finding from an earlier round (listed at the end of this brief), copy that finding's title into `same_as`.
+9. **Attention**: name a risky area only when nothing is wrong with it yet a human should look (a migration on real data, a security surface no proof could reach). Each entry names the area and why.
 
 Done when every raw finding is in `findings`, `preexisting` or `dropped`.

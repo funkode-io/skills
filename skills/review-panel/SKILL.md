@@ -5,7 +5,7 @@ description: Review a PR branch with a panel of isolated Claude reviewers (corre
 
 # Review panel
 
-A **panel** is a set of reviewers, each a fresh `claude -p` session that sees only the diff, the repository at HEAD and the linked issue, never the PR body or your summary. [`review-panel.py`](review-panel.py) runs them in parallel, then a **checker** that keeps only proven findings, and prints the verdict line first:
+A **panel** is a set of reviewers, each a fresh `claude -p` session that sees only the diff, the repository at HEAD and the linked issue, never the PR body or your summary. [`review-panel.py`](review-panel.py) runs them in parallel, then a **checker** that keeps only proven findings, prints the verdict line first, and posts the round as a pull request review:
 
 - `🟢 Approval recommended`: no findings.
 - `🟡 Changes recommended`: notes only, non-blocking.
@@ -51,12 +51,19 @@ python3 $PANEL run --repo . --ledger $LEDGER --model <reviewer model> --implemen
 
 The reviewer model differs from the one that wrote the change. The script picks the depth: rounds 1-2 review the whole diff at high effort; round 3 on reviews only files whose own change moved, blocking findings only. After a main merge, only files whose own change moved are reviewed, in any round. Exit 2 means a session failed: rerun, the ledger is untouched.
 
-## 4. Act on the verdict
+## 4. Post
+
+```bash
+python3 $PANEL post --repo . --ledger $LEDGER --pr <PR number or URL> --out <scratch dir>
+```
+
+One pull request review per round: the verdict is its body, each finding is an inline comment on its line, with a one-click suggestion when the checker proved the replacement. Findings on lines outside the diff stay in the body. A finding that repeats an open one continues in that finding's thread. Exit 2 means GitHub refused an anchor and nothing was posted: rerun with `--body-only`.
+
+## 5. Act on the verdict
 
 - 🟢: done.
-- 🟡 / 🔴: fix each finding, or decline it with `python3 $PANEL decline --ledger $LEDGER "<title>"` and a reason in the PR thread; reviewers re-raise a declined title only with new evidence. Commit, push, go back to step 1.
-  Reviewers never see the PR body, so a decision made after the issue was written reads as a spec deviation: decline it, citing where the decision is recorded.
+- 🟡 / 🔴: settle every finding, then commit, push, run `post` again without `--out` (it answers each settled thread, fixed or declined, and resolves it) and go back to step 1.
+  - Fixed, by your own commit: `python3 $PANEL fixed --ledger $LEDGER --commit <sha> "<title>"`.
+  - Declined: `python3 $PANEL decline --ledger $LEDGER --reason "<why, and where it was decided>" "<title>"`; reviewers re-raise a declined title only with new evidence. Reviewers never see the PR body, so a decision made after the issue was written reads as a spec deviation: decline it, citing where the decision is recorded.
 - 🔵: report the named areas to the owner and stop.
 - **Pre-existing bugs**: `easy` ones you fix in this PR with a note in the PR body; for `hard` ones propose a follow-up issue.
-
-Post the report (it is Markdown) as the round's PR comment.
