@@ -3,12 +3,16 @@
 
   review-panel.py plan    --repo DIR --ledger FILE [--base main]
   review-panel.py run     --repo DIR --ledger FILE --model M --reviewers a,b,... [options]
-  review-panel.py decline --ledger FILE "finding title" ...
+  review-panel.py post    --repo DIR --ledger FILE --pr N|URL [--out DIR] [--dry-run]
+  review-panel.py fixed   --ledger FILE --commit SHA "finding title" ...
+  review-panel.py decline --ledger FILE --reason WHY "finding title" ...
 
 `plan` prints the facts the caller chooses reviewers from (JSON). `run` prints the
-verdict line first, then the findings, and records the round in the ledger.
-Exit codes: 0 verdict printed, 2 panel incomplete (ledger untouched), 3 round limit,
-1 usage or setup error.
+verdict line first, then the findings, and records the round in the ledger. `post`
+publishes the round in DIR as one pull request review (verdict in the body, one inline
+comment per finding) and replies in the threads of findings since `fixed` or declined.
+Exit codes: 0 verdict printed or posted, 2 panel incomplete or review refused (ledger
+untouched), 3 round limit, 1 usage or setup error.
 """
 import argparse
 import concurrent.futures
@@ -58,6 +62,12 @@ FINDING = {
         "proof": {"type": "object", "properties": {"command": {"type": "string"},
                                                    "output": {"type": "string"}}},
         "preexisting": {"type": "boolean", "description": "true when the bug is not in this diff"},
+        "suggestion": {
+            "type": "object", "required": ["start_line", "end_line", "replacement"],
+            "description": "only when the whole fix is replacing these lines of `file` at HEAD",
+            "properties": {"start_line": {"type": "integer"}, "end_line": {"type": "integer"},
+                           "replacement": {"type": "string", "description": "the new text of "
+                                           "those lines, complete and indented; empty deletes"}}},
     },
 }
 REVIEWER_SCHEMA = {
@@ -74,7 +84,9 @@ CHECKER_SCHEMA = {
     "required": ["findings", "preexisting", "attention", "dropped"],
     "properties": {
         "findings": {"type": "array", "items": {**FINDING, "properties": {
-            **FINDING["properties"], "reviewers": {"type": "array", "items": {"type": "string"}}}}},
+            **FINDING["properties"], "reviewers": {"type": "array", "items": {"type": "string"}},
+            "same_as": {"type": "string", "description": "title of the open earlier finding this "
+                                                         "repeats"}}}},
         "preexisting": {"type": "array", "items": {
             "type": "object", "required": ["title", "file", "line", "problem", "effort", "fix"],
             "properties": {"title": {"type": "string"}, "file": {"type": "string"},
@@ -270,11 +282,20 @@ def cmd_plan(a):
     print()
 
 
-def cmd_decline(a):
+def cmd_outcome(a):
+    """Record what the author did with a finding; `post` says it in the finding's thread."""
     ledger = load_ledger(a.ledger)
-    for t in a.titles:
-        if t not in ledger["declined"]:
-            ledger["declined"].append(t)
+    threads = [t for t in ledger.get("threads", []) if t.get("outcome") != "fixed"]
+    for title in a.titles:
+        hit = [t for t in threads if t["title"] == title]
+        if a.cmd == "fixed" and not hit:
+            die("no open finding titled %r; open: %s" % (title, "; ".join(
+                t["title"] for t in threads) or "none"))
+        if a.cmd == "decline" and title not in ledger["declined"]:
+            ledger["declined"].append(title)
+        for t in hit:
+            t["outcome"] = "fixed" if a.cmd == "fixed" else "declined"
+            t["say"] = "Fixed in %s." % a.commit if a.cmd == "fixed" else "Declined: " + a.reason
     save_ledger(a.ledger, ledger)
 
 
@@ -414,6 +435,8 @@ def common_context(f, issue_path, declined):
     if declined:
         lines.append("Already declined by the author; re-raise only with new evidence: "
                      + "; ".join(declined))
+    lines.append("When the whole fix is replacing a few lines of one changed file, give it as "
+                 "`suggestion`; the checker applies it and keeps it only when it works.")
     return "\n".join(lines)
 
 
@@ -472,13 +495,23 @@ def verdict(checked, blocking_only):
     return "green"
 
 
-def render(f, colour, checked, timings):
+def fenced(text, lang=""):
+    """A code block whose fence is longer than any backtick run inside it."""
+    fence = "`" * max([3] + [len(m) + 1 for m in re.findall(r"`+", text)])
+    return "%s%s\n%s\n%s" % (fence, lang, text, fence)
+
+
+def render(f, colour, checked, timings, inline=None):
+    """The round as Markdown. `inline` (a summary line) marks a review body: its findings are the
+    ones no inline comment could carry."""
     out = ["### " + VERDICTS[colour], ""]
     out.append("Round %d · %s · patch-id %s · reviewers: %s" % (
         f["round"], f["head"][:12], f["patch_id"][:12],
         ", ".join("%s %ss" % (n, s) for n, s in timings)))
+    if inline:
+        out += ["", inline]
     if checked["findings"]:
-        out += ["", "#### Findings"]
+        out += ["", "#### Findings outside the diff" if inline else "#### Findings"]
         for x in checked["findings"]:
             out.append("- **%s** `%s:%s` (%s; %s) — %s" % (
                 x["title"], x["file"], x["line"], x["severity"], ", ".join(x.get("reviewers", [])),
@@ -488,6 +521,11 @@ def render(f, colour, checked, timings):
             if x.get("proof", {}).get("command"):
                 out.append("  - Proof: `%s` → %s" % (x["proof"]["command"],
                                                     x["proof"].get("output", "")[:500]))
+            if x.get("suggestion"):
+                s = x["suggestion"]
+                out.append("  - Suggested lines %d-%d:\n%s" % (
+                    s["start_line"], s["end_line"],
+                    re.sub(r"(?m)^", "    ", fenced(s["replacement"].rstrip("\n")))))
     if checked["preexisting"]:
         out += ["", "#### Pre-existing bugs (not this PR's change)"]
         for x in checked["preexisting"]:
@@ -502,6 +540,199 @@ def render(f, colour, checked, timings):
         out += ["- %s — %s" % (x.get("title", "?"), x.get("reason", "")) for x in checked["dropped"]]
         out += ["", "</details>"]
     return "\n".join(out)
+
+
+def right_lines(diff):
+    """{path: [hunk, ...]}, each hunk {line number at HEAD: text}: where GitHub accepts an inline
+    comment, which is only on a line inside a hunk of the pull request's diff."""
+    files, path, hunk, old, new, n = {}, None, None, 0, 0, 0
+    for line in diff.splitlines():
+        if old <= 0 and new <= 0:  # between hunks
+            if line.startswith("+++ "):
+                path = line[6:] if line.startswith("+++ b/") else None  # None: a deleted file
+            m = re.match(r"@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@", line)
+            if m and path:
+                old, n, new = int(m[1] or 1), int(m[2]), int(m[3] or 1)
+                hunk = {}
+                files.setdefault(path, []).append(hunk)
+        elif not line.startswith("\\"):
+            if not line.startswith("+"):
+                old -= 1
+            if not line.startswith("-"):
+                hunk[n] = line[1:]
+                n, new = n + 1, new - 1
+    return files
+
+
+def anchor(x, files):
+    """(first line, last line, suggestion applies) for a finding's inline comment, or None when
+    its line is outside the diff. A suggestion applies when its lines sit in one hunk and it
+    changes them: GitHub replaces exactly the lines the comment spans."""
+    hunks = files.get(x["file"], [])
+    s = x.get("suggestion")
+    if s and s["start_line"] <= s["end_line"]:
+        span = range(s["start_line"], s["end_line"] + 1)
+        for h in hunks:
+            if all(i in h for i in span) and "\n".join(h[i] for i in span) != s[
+                    "replacement"].rstrip("\n"):
+                return span[0], span[-1], True
+    return next(((x["line"], x["line"], False) for h in hunks if x["line"] in h), None)
+
+
+def comment_body(x, suggest):
+    """One finding as a review comment; `suggest` makes its suggestion a one-click block."""
+    label = "%s; %s" % (x["severity"], ", ".join(x.get("reviewers", []))) if x.get(
+        "severity") else "pre-existing, %s" % x["effort"]
+    out = ["**%s** (%s)" % (x["title"], label), "", x["problem"]]
+    if x.get("fix"):
+        out += ["", "Fix: " + x["fix"]]
+    if x.get("evidence"):
+        out += ["", "Evidence: " + x["evidence"]]
+    if x.get("proof", {}).get("command"):
+        out += ["", "<details><summary>Proof</summary>", "", fenced(x["proof"]["command"], "sh"),
+                "", fenced(x["proof"].get("output", "")[:2000]), "", "</details>"]
+    s = x.get("suggestion")
+    if s and suggest:
+        out += ["", fenced(s["replacement"].rstrip("\n"), "suggestion")]
+    elif s:
+        out += ["", "Proposed lines %d-%d:" % (s["start_line"], s["end_line"]), "",
+                fenced(s["replacement"].rstrip("\n"))]
+    return "\n".join(out)[:60000]
+
+
+def gh_api(a, method, endpoint, payload=None):
+    """One GitHub API call through gh; with --dry-run a write is printed instead of sent."""
+    if a.dry_run and method != "GET":
+        a.printed.append({"method": method, "endpoint": endpoint, "body": payload})
+        return {}
+    r = subprocess.run(["gh", "api", "--method", method, endpoint] + (
+        ["--input", "-"] if payload is not None else []),
+        input=json.dumps(payload) if payload is not None else None, capture_output=True, text=True)
+    if r.returncode != 0:
+        refused = "reviews" in endpoint and method == "POST"
+        die("gh api %s %s: %s%s" % (method, endpoint, (r.stderr or r.stdout).strip()[:500],
+                                    "\nGitHub refused the review; nothing was posted. Rerun with "
+                                    "--body-only to post it without inline comments."
+                                    if refused else ""), 2 if refused else 1)
+    return json.loads(r.stdout) if r.stdout.strip() else {}
+
+
+THREADS = """query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){
+reviewThreads(first:100){nodes{id comments(first:1){nodes{databaseId}}}}}}}"""
+RESOLVE = "mutation($t:ID!){resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}"
+
+
+def cmd_post(a):
+    a.printed = []
+    ledger = load_ledger(a.ledger)
+    threads = ledger.setdefault("threads", [])
+    try:
+        r = subprocess.run(["gh", "pr", "view", a.pr, "--json", "url,headRefOid"] + (
+            ["-R", a.pr_repo] if a.pr_repo else []), cwd=a.repo, capture_output=True, text=True)
+    except FileNotFoundError:
+        die("post needs the gh CLI on PATH")
+    if r.returncode != 0:
+        die("gh pr view %s: %s" % (a.pr, r.stderr.strip()))
+    pr = json.loads(r.stdout)
+    # The pull request lives in the base repository, also when its branch is in a fork.
+    repo, number = re.search(r"://[^/]+/([^/]+/[^/]+)/pull/(\d+)", pr["url"]).groups()
+    pulls = "repos/%s/pulls/%s" % (repo, number)
+
+    rnd = None
+    if a.out:
+        with open(os.path.join(a.out, "findings.json"), encoding="utf-8") as fh:
+            rnd = json.load(fh)
+        if rnd["round"] <= ledger.get("posted", 0):
+            rnd = None
+    loose = [t for t in threads if t.get("say") and not t.get("comment")]
+    review, new = None, []
+    if rnd:
+        if rnd["head"] != pr["headRefOid"]:
+            print("review-panel: the PR head moved to %s; comments anchor to the reviewed %s" % (
+                pr["headRefOid"][:12], rnd["head"][:12]), file=sys.stderr)
+        with open(os.path.join(a.out, "inputs", "change.diff"), encoding="utf-8") as fh:
+            files = {} if a.body_only else right_lines(fh.read())
+        checked, comments, rest = rnd["checked"], [], {"findings": [], "preexisting": []}
+        for kind in ("findings", "preexisting"):
+            for x in checked[kind]:
+                open_ = [t for t in threads if t["title"] == x.get("same_as") and t.get("comment")
+                         and t.get("outcome") != "fixed"]
+                if open_:  # the earlier round's thread carries it: reply there, no new thread
+                    open_[-1].update(title=x["title"], round=rnd["round"], outcome=None, say="\n\n".join(
+                        filter(None, [open_[-1].get("say"), "Still open in round %d." % rnd["round"],
+                                      comment_body(x, False)])))
+                    continue
+                at = anchor(x, files)
+                mark = "<!-- review-panel %d.%d -->" % (rnd["round"], len(new))
+                new.append({"title": x["title"], "round": rnd["round"], "comment": None,
+                            "mark": mark if at else None})
+                if not at:
+                    rest[kind].append(x)
+                    continue
+                c = {"path": x["file"], "line": at[1], "side": "RIGHT",
+                     "body": comment_body(x, at[2]) + "\n\n" + mark}
+                if at[0] != at[1]:
+                    c.update(start_line=at[0], start_side="RIGHT")
+                comments.append(c)
+        total = len(checked["findings"]) + len(checked["preexisting"])
+        inline = None if a.body_only or not total else (
+            "Inline comments: %d. Continued in earlier threads: %d. Below: %d." % (
+                len(comments), total - len(new), len(new) - len(comments)))
+        body = render(rnd, rnd["verdict"], {**checked, **rest}, rnd["timings"], inline)
+        review = {"commit_id": rnd["head"], "event": "COMMENT", "comments": comments, "body": body}
+    elif loose:
+        review = {"event": "COMMENT", "comments": [], "body": "### Review panel: earlier findings"}
+    if review:
+        if loose:
+            review["body"] += "\n\n#### Earlier findings without a thread\n" + "\n".join(
+                "- **%s** (round %d): %s" % (t["title"], t["round"], t["say"]) for t in loose)
+        tag = "<!-- review-panel round %d -->" % rnd["round"] if rnd else ""
+        review["body"] = review["body"][:60000] + "\n\n" + tag
+        # A review already on the PR for this round (posted, then the ledger write lost) is adopted.
+        done = next((r for r in gh_api(a, "GET", pulls + "/reviews?per_page=100")
+                     if tag and tag in (r.get("body") or "")), None) if not a.dry_run else None
+        done = done or gh_api(a, "POST", pulls + "/reviews", review)
+        if not a.dry_run:
+            marks = {t["mark"]: t for t in new if t["mark"]}
+            for c in gh_api(a, "GET", "%s/reviews/%s/comments?per_page=100" % (pulls, done["id"])):
+                for mark, t in marks.items():
+                    if mark in c["body"]:
+                        t["comment"] = c["id"]
+            for t in new:
+                del t["mark"]
+            for t in loose:
+                del t["say"]
+            threads += new
+            if rnd:
+                ledger["posted"] = rnd["round"]
+            save_ledger(a.ledger, ledger)
+            print(done.get("html_url", ""))
+
+    ids, said = None, 0
+    for t in threads:
+        if not (t.get("say") and t.get("comment")):
+            continue
+        gh_api(a, "POST", "%s/comments/%s/replies" % (pulls, t["comment"]), {"body": t["say"]})
+        if t.get("outcome"):  # fixed or declined: the thread is settled
+            if ids is None:  # thread ids are read, so a dry run names the thread by its comment
+                owner, name = repo.split("/")
+                got = {} if a.dry_run else gh_api(a, "POST", "graphql", {
+                    "query": THREADS, "variables": {"o": owner, "r": name, "n": int(number)}})
+                ids = {n["comments"]["nodes"][0]["databaseId"]: n["id"] for n in got.get(
+                    "data", {}).get("repository", {}).get("pullRequest", {}).get(
+                    "reviewThreads", {}).get("nodes", []) if n["comments"]["nodes"]}
+            gh_api(a, "POST", "graphql", {"query": RESOLVE, "variables": {
+                "t": ids.get(t["comment"], "<thread of comment %s>" % t["comment"])}})
+        said += 1
+        if not a.dry_run:
+            del t["say"]
+            save_ledger(a.ledger, ledger)
+    if a.dry_run:
+        json.dump(a.printed, sys.stdout, indent=2, ensure_ascii=False)
+        print()
+    print("review-panel: %s, %d thread replies%s" % (
+        "1 review" if review else "no review", said, " (dry run)" if a.dry_run else ""),
+        file=sys.stderr)
 
 
 def cmd_run(a):
@@ -592,7 +823,10 @@ def cmd_run(a):
                  "cwd": scratch_copy(a.repo, os.path.join(work, "check"), f["head"], f["base"],
                                      f["base_sha"]),
                  "system": ctx + "\n\n" + prompt_file("checker") + "\n\nThe panel's raw findings: "
-                 + os.path.join(panel, "panel.json"), "add_dirs": [panel],
+                 + os.path.join(panel, "panel.json") + "\n\nOpen findings from earlier rounds: "
+                 + json.dumps([t["title"] for t in ledger.get("threads", [])
+                               if t.get("outcome") != "fixed"], ensure_ascii=False),
+                 "add_dirs": [panel],
                  "prompt": "Check the panel's findings as your brief says and answer in the JSON "
                            "schema."}
         name, checked, err, secs = run_claude(check, a)
@@ -609,6 +843,10 @@ def cmd_run(a):
         report = render(f, colour, checked, timings)
         with open(os.path.join(a.out, "report.md"), "w") as fh:
             fh.write(report + "\n")
+        with open(os.path.join(a.out, "findings.json"), "w") as fh:  # what `post` publishes
+            json.dump({"round": f["round"], "head": f["head"], "patch_id": f["patch_id"],
+                       "verdict": colour, "timings": timings, "checked": checked}, fh, indent=2,
+                      ensure_ascii=False)
         print(report)
         ledger.update({"round": f["round"], "patch_id": f["patch_id"], "head": f["head"],
                        "base_sha": f["base_sha"], "files": f["per_file"], "verdict": colour})
@@ -645,13 +883,26 @@ def main():
     r.add_argument("--parallel", type=int, default=4)
     r.add_argument("--force", action="store_true", help="review an unchanged patch-id or round 6+")
     r.add_argument("--dry-run", action="store_true", help="list the sessions without running them")
-    d = sub.add_parser("decline")
-    d.add_argument("--ledger", required=True)
-    d.add_argument("titles", nargs="+")
+    o = sub.add_parser("post")
+    o.add_argument("--repo", required=True, help="the PR branch's checkout")
+    o.add_argument("--ledger", required=True)
+    o.add_argument("--pr", required=True, help="pull request number or URL")
+    o.add_argument("--pr-repo", help="owner/repo of the PR when --pr is a number gh cannot place")
+    o.add_argument("--out", help="the round's --out directory; omit to only reply in threads")
+    o.add_argument("--body-only", action="store_true", help="no inline comments: all in the body")
+    o.add_argument("--dry-run", action="store_true", help="print the requests, send nothing")
+    for name in ("fixed", "decline"):
+        d = sub.add_parser(name)
+        d.add_argument("--ledger", required=True)
+        d.add_argument("titles", nargs="+")
+    sub.choices["fixed"].add_argument("--commit", required=True, help="the commit that fixes them")
+    sub.choices["decline"].add_argument("--reason", required=True,
+                                        help="posted in the finding's thread")
     a = p.parse_args()
     if getattr(a, "repo", None):
         a.repo = os.path.abspath(a.repo)
-    sys.exit({"plan": cmd_plan, "run": cmd_run, "decline": cmd_decline}[a.cmd](a) or 0)
+    sys.exit({"plan": cmd_plan, "run": cmd_run, "post": cmd_post, "fixed": cmd_outcome,
+              "decline": cmd_outcome}[a.cmd](a) or 0)
 
 
 if __name__ == "__main__":
