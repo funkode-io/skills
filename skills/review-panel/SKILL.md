@@ -1,6 +1,6 @@
 ---
 name: review-panel
-description: Review a PR branch with a panel of isolated Claude reviewers (correctness, attacker, spec, security, data, UI, repo rules) run in parallel in fresh sessions, then a checker, ending in a Copilot-style verdict. Use when asked to review a PR or branch locally, replace a Copilot review, or get a PR to approval.
+description: Review a PR branch with a panel of isolated Claude reviewers (correctness, attacker, design, spec, security, data, UI, repo rules) run in parallel in fresh sessions, then a checker, ending in a Copilot-style verdict. Use when asked to review a PR or branch locally, replace a Copilot review, or get a PR to approval.
 ---
 
 # Review panel
@@ -30,7 +30,7 @@ Reviewers run on the Claude login of whoever runs the panel (`claude` must be lo
 
 ## 2. Choose the reviewers
 
-Read the diff. Correctness and Attacker always run. Add:
+Read the diff. Correctness, Attacker and Design always run: Design checks the change against the project's principles and for code smells, which the others, who take the design as given, do not. Add:
 
 - `spec` when the PR links an issue (pass `--issue`);
 - `security` when it touches auth, input parsing, secrets, bot or web surfaces;
@@ -46,7 +46,7 @@ Done when every reviewer is in or out with a one-line reason.
 
 ```bash
 python3 $PANEL run --repo . --ledger $LEDGER --model <reviewer model> --implementer-model <yours> \
-  --reviewers correctness,attacker,spec,rules --issue <N> --out <scratch dir>
+  --reviewers correctness,attacker,design,spec,rules --issue <N> --out <scratch dir>
 ```
 
 The reviewer model differs from the one that wrote the change. The script picks the depth: rounds 1-2 review the whole diff at high effort; round 3 on reviews only files whose own change moved, blocking findings only. After a main merge, only files whose own change moved are reviewed, in any round. Exit 2 means a session failed: rerun, the ledger is untouched.
@@ -65,5 +65,6 @@ One pull request review per round: the verdict is its body, each finding is an i
 - 🟡 / 🔴: settle every finding, then commit, push, run `post` again without `--out` (it answers each settled thread, fixed or declined, and resolves it) and go back to step 1.
   - Fixed, by your own commit: `python3 $PANEL fixed --ledger $LEDGER --commit <sha> "<title>"`.
   - Declined: `python3 $PANEL decline --ledger $LEDGER --reason "<why, and where it was decided>" "<title>"`; reviewers re-raise a declined title only with new evidence. Reviewers never see the PR body, so a decision made after the issue was written reads as a spec deviation: decline it, citing where the decision is recorded.
+- A design finding that ends in a question is the owner's decision: put the question to the owner with the finding's evidence, and change the code only after the answer.
 - 🔵: report the named areas to the owner and stop.
 - **Pre-existing bugs**: `easy` ones you fix in this PR with a note in the PR body; for `hard` ones propose a follow-up issue.

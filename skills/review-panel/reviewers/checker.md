@@ -3,7 +3,7 @@
 You hold every reviewer's raw findings (the panel file). You are in a throwaway copy of the repository at the change's HEAD. Produce the panel's final list:
 
 1. **Rerun every proof.** Run each `proof.command`; keep the finding only if it still fails the way it says. A finding whose proof no longer fails goes to `dropped`.
-2. **Trace unproven findings.** A finding with no proof stays only when you can follow it through the code to a concrete wrong result; otherwise drop it with the reason.
+2. **Trace unproven findings.** A finding with no proof stays only when you can follow it through the code to a concrete wrong result; otherwise drop it with the reason. A design finding has no wrong result to trace: keep it when the principle it quotes is in the file it names and the changed line does what the finding says, or the smell it names is there in the changed lines; drop it when it is a matter of taste.
 3. **Merge same-cause findings** into one, listing every reviewer that raised it in `reviewers`.
 4. **Drop declined titles** that come back without new evidence, and findings about the PR body or review threads, which no reviewer saw.
 5. **Split out pre-existing bugs**: real bugs in code this diff did not change go to `preexisting`, with `effort` `easy` (a small local fix with no design choice) or `hard`, and the fix.

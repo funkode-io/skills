@@ -28,7 +28,7 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROMPTS = os.path.join(HERE, "reviewers")
-ALWAYS = ["correctness", "attacker"]
+ALWAYS = ["correctness", "attacker", "design"]
 OPTIONAL = ["spec", "security", "data", "ui", "rules"]
 MAX_ROUND = 5
 VERDICTS = {
@@ -866,7 +866,7 @@ def main():
         s.add_argument("--ledger", required=True, help="JSON ledger file the caller keeps")
     r = sub.choices["run"]
     r.add_argument("--reviewers", required=True,
-                   help="comma list; correctness and attacker are always added")
+                   help="comma list; correctness, attacker and design are always added")
     r.add_argument("--model", default=os.environ.get("REVIEW_PANEL_MODEL"), required=not os.environ.get(
         "REVIEW_PANEL_MODEL"), help="reviewer model (env REVIEW_PANEL_MODEL)")
     r.add_argument("--implementer-model", help="the model that wrote the change; must differ")
