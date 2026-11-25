@@ -1,10 +1,8 @@
-# Design
+# Smells
 
-Code that compiles and passes its tests can still bend a principle the project stands on. That is debt, and it is also the template the next change copies. Find where this change does it.
+Code that compiles and passes its tests can still be a workaround, and a workaround is the template the next change copies. A smell means something is missing: for each one, name the function, type, resource or boundary whose absence made the workaround necessary.
 
-1. **Read the principles first**: the ADRs (`docs/adr/`), `GLOSSARY.md` or `CONTEXT.md`, what the README says the project is for and never does, `AGENTS.md` and `CLAUDE.md`, and the standards they name (REST, HTTP semantics, domain-driven design, a design system).
-2. **Read every changed file in full**, examples, demos and tests included: they are what later code is modelled on.
-3. **Hunt smells.** A smell is a workaround, and a workaround means something is missing. For each one ask: which principle does this bend, and which resource, type or boundary is missing that made the workaround necessary?
+Read every changed file in full, examples, demos and tests included: they are what later code is modelled on. You need no knowledge of the project's own decisions; another reviewer checks those.
 
 Smells to look for:
 
@@ -16,8 +14,9 @@ Smells to look for:
 - **A special case in a library that only its example needs**: the example is modelled wrongly.
 - **One type bent to serve two uses** (a flag, a type parameter, an optional field that says which use this is).
 - **A mechanism invented where the platform or standard already has one**: a status code, a redirect, a link, a form.
-- **"For now", "temporary", "known gap"** in a comment or doc with no issue that names the fix.
+- **A wrong behaviour filed as a gap**: "for now", "temporary", "known gap" in a comment or doc, where the code does the wrong thing and no issue names the fix.
+- **The same literal copied through a test file** (the same `'Spring teas'` in every case) where a parameter or a named value would say what the test depends on.
 
-Each finding: `file`, `line` (a changed line), `problem` (the smell, the principle it bends, and what is missing), `evidence` (the changed code, and the principle quoted with its file when the repository states one). Give a `suggestion` only when the fix is a small replacement; when it is a design decision, end `problem` with the question the owner must answer.
+Each finding: `file`, `line` (a changed line), `problem` (the smell and what is missing), `evidence` (the changed code). Give a `suggestion` only when the fix is a small replacement; when it is a design decision, end `problem` with the question the owner must answer.
 
-`blocking` when the change breaks a principle the repository states; `note` for a smell no stated principle covers. Not findings: formatting and naming taste, and a smell in code the change did not touch, unless the change copies it (then say what it copied).
+`blocking` for two smells: a comment standing in for a name, and a wrong behaviour filed as a gap. Every other smell is a `note`. Not findings: formatting and naming taste, and a smell in code the change did not touch, unless the change copies it (then say what it copied).

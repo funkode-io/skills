@@ -6,7 +6,7 @@ Agent skills I wrote, kept in one place so any agent can install them.
 | --- | --- |
 | [`address-pr-review`](skills/address-pr-review) | Take a PR from "has open feedback and/or is behind upstream" to "all threads addressed and resolved, branch in sync" — without rewriting history. Interactive: you approve the plan. |
 | [`spar-with-copilot`](skills/spar-with-copilot) | Unattended agent-to-agent loop: address Copilot's review comments round after round until it recommends approval, judging every finding against the PR's original intent so the PR doesn't drift. |
-| [`review-panel`](skills/review-panel) | Local PR review by a panel of isolated Claude reviewers (correctness, attacker, design, spec, security, data, UI, repo rules) in parallel fresh sessions, then a checker that keeps only proven findings; ends in a Copilot-style verdict, posted as a pull request review with one inline comment per finding and one-click suggestions. |
+| [`review-panel`](skills/review-panel) | Local PR review by a panel of isolated Claude reviewers (correctness, attacker, smells, spec, security, data, UI, repo rules) in parallel fresh sessions, then a checker that keeps only proven findings; ends in a Copilot-style verdict, posted as a pull request review with one inline comment per finding and one-click suggestions. |
 | [`implement-frontier`](skills/implement-frontier) | Start every issue of a spec that can be implemented now, and decide which blocked issues may start stacked on their blocker's branch. |
 | [`delegate-frontier`](skills/delegate-frontier) | Open a draft PR for every unblocked ticket of a spec and hand each to GitHub Copilot. |
 | [`stack-on-pr`](skills/stack-on-pr) | Same, but for the tickets a still-open PR unblocks — stacked on that PR's branch. |
