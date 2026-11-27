@@ -446,8 +446,10 @@ def common_context(f, issue_path, declined):
     lines = [
         "You are one reviewer on an independent panel. You did not write this change and know "
         "nothing about it beyond what is in the repository and the files named here.",
-        "The change: `git diff origin/%s...HEAD` in the current directory (also saved at %s)."
-        % (f["base"], f["_diff_path"]),
+        "The change is saved at %s (it is `git diff origin/%s...HEAD` in the current directory): "
+        "read it there with Read, in parts when it is long. A tool result too large to show is "
+        "saved to a file you cannot open, so ask for less: one file's diff, a narrower search, a "
+        "range of lines." % (f["_diff_path"], f["base"]),
         "Round %d. Files in scope: %s." % (f["round"], ", ".join(f["scope"])),
     ]
     if f["blocking_only"]:
