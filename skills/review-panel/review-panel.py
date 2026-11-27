@@ -41,7 +41,7 @@ VERDICTS = {
 HINTS = {
     "security": r"auth|login|session|token|secret|crypt|password|permission|telegram|bot|webhook|"
                 r"handler|route|api/|parse|deserial|upload|cors|csrf|\.env",
-    "data": r"migration|\.sql$|schema|events?[/_.]|event_?store|repositor|ledger|balance|price|"
+    "data": r"migration|\.sql$|schema|events?[/_.]|event_?store|aggregate|projection|repositor|ledger|balance|price|"
             r"money|amount|decimal|fee|pnl",
     "ui": r"\.(html|css|scss|tsx|jsx|vue|svelte)$|templates/|assets/|web/|ui/|static/",
 }

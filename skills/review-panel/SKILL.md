@@ -34,7 +34,7 @@ Read the diff. Correctness, Attacker and Smells always run: any edit can add a s
 
 - `spec` when the PR links an issue (pass `--issue`) or `spec_docs` is non-empty: it checks the change against the issue, the glossary and the decision records;
 - `security` when it touches auth, input parsing, secrets, bot or web surfaces;
-- `data` when it touches migrations, the event store or money maths;
+- `data` when it touches migrations, events or the command handlers that record them, projections, or money maths;
 - `ui` when it changes what a user sees and an approved prototype exists (`--prototype`, `--screenshots`);
 - `rules` when `rule_topics` is non-empty. Pass `--topics <rule file>` only for a rule area the paths cannot show.
 
@@ -49,7 +49,7 @@ python3 $PANEL run --repo . --ledger $LEDGER --model <reviewer model> --implemen
   --reviewers correctness,attacker,smells,spec,rules --issue <N> --out <scratch dir>
 ```
 
-The reviewer model differs from the one that wrote the change. The script picks the depth: rounds 1-2 review the whole diff at high effort; round 3 on reviews only files whose own change moved, blocking findings only. After a main merge, only files whose own change moved are reviewed, in any round. Exit 2 means a session failed: rerun, the ledger is untouched.
+The reviewer model differs from the one that wrote the change. The script picks the depth: rounds 1-2 review the whole diff at high effort; round 3 on reviews only files whose own change moved, blocking findings only. After a main merge, only files whose own change moved are reviewed, in any round. Exit 2 means a session failed: rerun, the ledger is untouched. The report ends with the tool calls refused to the reviewers: a session is never asked, so that list is the only sign that a reviewer could not read something.
 
 ## 4. Post
 
