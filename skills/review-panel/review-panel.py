@@ -419,6 +419,24 @@ def parse(raw):
     return out if isinstance(out, dict) and "findings" in out else None
 
 
+def refused(out_dir, names):
+    """Tool calls the sessions were refused, read from each session's raw output. A session is
+    never asked: it gets an error and goes on, so without this list a refused read is invisible."""
+    lines = []
+    for name in names:
+        try:
+            with open(os.path.join(out_dir, name + ".json"), encoding="utf-8") as fh:
+                denials = json.load(fh).get("permission_denials") or []
+        except (OSError, ValueError, AttributeError):
+            continue
+        for d in denials:
+            what = d.get("tool_input") or {}
+            target = what.get("file_path") or what.get("command") or what.get("pattern") or ""
+            lines.append("%s: %s %s" % (name, d.get("tool_name", "?"), " ".join(
+                target.replace(login_dir(), "<Claude login>").split())[:160]))
+    return lines
+
+
 def prompt_file(name):
     with open(os.path.join(PROMPTS, name + ".md"), encoding="utf-8") as fh:
         return fh.read()
@@ -545,6 +563,10 @@ def render(f, colour, checked, timings, inline=None):
             checked["dropped"]), ""]
         out += ["- %s — %s" % (x.get("title", "?"), x.get("reason", "")) for x in checked["dropped"]]
         out += ["", "</details>"]
+    if checked.get("refused"):
+        out += ["", "<details><summary>Tool calls refused to the reviewers (%d)</summary>" % len(
+            checked["refused"]), ""]
+        out += ["- `%s`" % x.replace("`", "'") for x in checked["refused"]] + ["", "</details>"]
     return "\n".join(out)
 
 
@@ -846,6 +868,7 @@ def cmd_run(a):
         if f["blocking_only"]:
             checked["findings"] = [x for x in checked["findings"] if x["severity"] == "blocking"]
         colour = verdict(checked, f["blocking_only"])
+        checked["refused"] = refused(a.out, [n for n, _ in timings])
         report = render(f, colour, checked, timings)
         with open(os.path.join(a.out, "report.md"), "w") as fh:
             fh.write(report + "\n")
