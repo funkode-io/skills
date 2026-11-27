@@ -28,7 +28,7 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROMPTS = os.path.join(HERE, "reviewers")
-ALWAYS = ["correctness", "attacker"]
+ALWAYS = ["correctness", "attacker", "smells"]
 OPTIONAL = ["spec", "security", "data", "ui", "rules"]
 MAX_ROUND = 5
 VERDICTS = {
@@ -41,12 +41,12 @@ VERDICTS = {
 HINTS = {
     "security": r"auth|login|session|token|secret|crypt|password|permission|telegram|bot|webhook|"
                 r"handler|route|api/|parse|deserial|upload|cors|csrf|\.env",
-    "data": r"migration|\.sql$|schema|events?[/_.]|event_?store|repositor|ledger|balance|price|"
+    "data": r"migration|\.sql$|schema|events?[/_.]|event_?store|aggregate|projection|repositor|ledger|balance|price|"
             r"money|amount|decimal|fee|pnl",
     "ui": r"\.(html|css|scss|tsx|jsx|vue|svelte)$|templates/|assets/|web/|ui/|static/",
 }
 RULE_FILES = ["AGENTS.md", "CLAUDE.md", ".github/copilot-instructions.md"]
-REFERENCE_GLOBS = ["GLOSSARY.md", "CONTEXT.md", "docs/adr/*.md", "docs/adrs/*.md", "adr/*.md",
+SPEC_GLOBS = ["GLOSSARY.md", "CONTEXT.md", "docs/adr/*.md", "docs/adrs/*.md", "adr/*.md",
                    "docs/decisions/*.md"]
 
 FINDING = {
@@ -205,8 +205,7 @@ def rule_topics(repo, files):
                 if os.path.isfile(os.path.join(repo, p)) and p not in wide:
                     wide.append(p)
             d = os.path.dirname(d)
-    refs = sorted(p for p in tracked(repo) if any(fnmatch.fnmatch(p, g) for g in REFERENCE_GLOBS))
-    topics.append({"topic": "repo-wide", "rules": wide, "references": refs, "files": files})
+    topics.append({"topic": "repo-wide", "rules": wide, "files": files})
     idir = os.path.join(repo, ".github", "instructions")
     if os.path.isdir(idir):
         for name in sorted(os.listdir(idir)):
@@ -224,12 +223,16 @@ def rule_topics(repo, files):
             hit = [f for f in files if any(glob_match(f, g) for g in globs)]
             if hit:
                 topics.append({"topic": name[:-len(".instructions.md")] if name.endswith(
-                    ".instructions.md") else name[:-3], "rules": [rel], "references": [],
-                    "files": hit})
+                    ".instructions.md") else name[:-3], "rules": [rel], "files": hit})
     return [t for t in topics if t["rules"]]
 
 
 _TRACKED = {}
+
+
+def spec_docs(repo):
+    """The standing spec: the glossary and the decision records."""
+    return sorted(p for p in tracked(repo) if any(fnmatch.fnmatch(p, g) for g in SPEC_GLOBS))
 
 
 def tracked(repo):
@@ -270,6 +273,7 @@ def facts(repo, base, ledger):
         "last_verdict": ledger.get("verdict"), "last_round": ledger.get("round", 0),
         "path_hints": {k: v for k, v in hints.items() if v},
         "rule_topics": rule_topics(repo, files),
+        "spec_docs": spec_docs(repo),
         "_diff": diff,
     }
 
@@ -344,7 +348,10 @@ def session_settings(a, sandboxed):
     command substitution in a path still reads any file: sandboxing them too is the open fix.
     """
     login = login_dir()
-    settings = {"permissions": {"deny": ["Read(/%s/**)" % login, "Edit(/%s/**)" % login]}}
+    # A command's output above this size is saved under the login directory, where no session may
+    # read it back; 128000 is the most Claude Code returns inline.
+    settings = {"permissions": {"deny": ["Read(/%s/**)" % login, "Edit(/%s/**)" % login]},
+                "bashOutputMaxChars": 128000}
     if sandboxed:
         caches = [os.path.expanduser(c) for c in CACHES if os.path.isdir(os.path.expanduser(c))]
         settings["sandbox"] = {
@@ -415,6 +422,24 @@ def parse(raw):
     return out if isinstance(out, dict) and "findings" in out else None
 
 
+def refused(out_dir, names):
+    """Tool calls the sessions were refused, read from each session's raw output. A session is
+    never asked: it gets an error and goes on, so without this list a refused read is invisible."""
+    lines = []
+    for name in names:
+        try:
+            with open(os.path.join(out_dir, name + ".json"), encoding="utf-8") as fh:
+                denials = json.load(fh).get("permission_denials") or []
+        except (OSError, ValueError, AttributeError):
+            continue
+        for d in denials:
+            what = d.get("tool_input") or {}
+            target = what.get("file_path") or what.get("command") or what.get("pattern") or ""
+            lines.append("%s: %s %s" % (name, d.get("tool_name", "?"), " ".join(
+                target.replace(login_dir(), "<Claude login>").split())[:160]))
+    return lines
+
+
 def prompt_file(name):
     with open(os.path.join(PROMPTS, name + ".md"), encoding="utf-8") as fh:
         return fh.read()
@@ -424,14 +449,16 @@ def common_context(f, issue_path, declined):
     lines = [
         "You are one reviewer on an independent panel. You did not write this change and know "
         "nothing about it beyond what is in the repository and the files named here.",
-        "The change: `git diff origin/%s...HEAD` in the current directory (also saved at %s)."
-        % (f["base"], f["_diff_path"]),
+        "The change is saved at %s (it is `git diff origin/%s...HEAD` in the current directory): "
+        "read it there with Read, in parts when it is long. A tool result too large to show is "
+        "saved to a file you cannot open, so ask for less: one file's diff, a narrower search, a "
+        "range of lines." % (f["_diff_path"], f["base"]),
         "Round %d. Files in scope: %s." % (f["round"], ", ".join(f["scope"])),
     ]
     if f["blocking_only"]:
         lines.append("This is round 3 or later: report blocking findings only.")
     if issue_path:
-        lines.append("The linked issue (the spec) is at %s." % issue_path)
+        lines.append("The linked issue is at %s." % issue_path)
     if declined:
         lines.append("Already declined by the author; re-raise only with new evidence: "
                      + "; ".join(declined))
@@ -455,6 +482,9 @@ def build_jobs(a, f, issue_path, work, declined):
             job["cwd"] = scratch_copy(a.repo, os.path.join(work, "attack"), f["head"], f["base"],
                                       f["base_sha"])
             job["tools"] = EXEC
+        if name == "spec":
+            job["system"] += "\n\nGlossary and decision records: %s." % (
+                ", ".join(f["spec_docs"]) or "none")
         if name == "ui":
             job["add_dirs"] = [d for d in (os.path.dirname(os.path.abspath(a.prototype)),
                                           a.screenshots) if d]
@@ -463,7 +493,7 @@ def build_jobs(a, f, issue_path, work, declined):
         jobs.append(job)
     seen = set()
     if "rules" in a.reviewers:
-        topics = f["rule_topics"] + [{"topic": os.path.basename(t), "rules": [t], "references": [],
+        topics = f["rule_topics"] + [{"topic": os.path.basename(t), "rules": [t],
                                       "files": f["scope"]} for t in a.topics]
         for t in topics:
             in_scope = [x for x in t["files"] if x in f["scope"]]
@@ -478,9 +508,8 @@ def build_jobs(a, f, issue_path, work, declined):
                 "name": name,
                 "effort": effort, "schema": REVIEWER_SCHEMA, "cwd": ro,
                 "system": ctx + "\n\n" + prompt_file("rules") + "\n\nYour topic: %s.\nRule files: "
-                "%s.\nReference (read when a rule points there): %s.\nChanged files this topic "
-                "covers: %s." % (t["topic"], ", ".join(t["rules"]),
-                                 ", ".join(t["references"]) or "none", ", ".join(in_scope)),
+                "%s.\nChanged files this topic covers: %s." % (
+                    t["topic"], ", ".join(t["rules"]), ", ".join(in_scope)),
                 "prompt": "Check the change against your rule files and answer in the JSON schema."})
     return jobs
 
@@ -539,6 +568,10 @@ def render(f, colour, checked, timings, inline=None):
             checked["dropped"]), ""]
         out += ["- %s — %s" % (x.get("title", "?"), x.get("reason", "")) for x in checked["dropped"]]
         out += ["", "</details>"]
+    if checked.get("refused"):
+        out += ["", "<details><summary>Tool calls refused to the reviewers (%d)</summary>" % len(
+            checked["refused"]), ""]
+        out += ["- `%s`" % x.replace("`", "'") for x in checked["refused"]] + ["", "</details>"]
     return "\n".join(out)
 
 
@@ -748,13 +781,13 @@ def cmd_run(a):
     unknown = [r for r in chosen if r not in ALWAYS + OPTIONAL]
     if unknown:
         die("unknown reviewers: %s" % ", ".join(unknown))
-    if "spec" in chosen and not a.issue:
-        die("spec needs --issue (the linked issue)")
     if "ui" in chosen and not a.prototype:
         die("ui needs --prototype (the approved prototype HTML)")
     a.reviewers = ALWAYS + [r for r in OPTIONAL if r in chosen]
     ledger = load_ledger(a.ledger)
     f = facts(a.repo, a.base, ledger)
+    if "spec" in chosen and not (a.issue or f["spec_docs"]):
+        die("spec needs --issue (the linked issue) or a glossary or decision record in the repo")
     if f["skip"] and not a.force:
         print("### " + VERDICTS.get(ledger.get("verdict"), "🔵 Needs a closer look"))
         print("\nNo re-review: the PR's own change (patch-id %s) is unchanged since round %d."
@@ -840,6 +873,7 @@ def cmd_run(a):
         if f["blocking_only"]:
             checked["findings"] = [x for x in checked["findings"] if x["severity"] == "blocking"]
         colour = verdict(checked, f["blocking_only"])
+        checked["refused"] = refused(a.out, [n for n, _ in timings])
         report = render(f, colour, checked, timings)
         with open(os.path.join(a.out, "report.md"), "w") as fh:
             fh.write(report + "\n")
@@ -866,7 +900,7 @@ def main():
         s.add_argument("--ledger", required=True, help="JSON ledger file the caller keeps")
     r = sub.choices["run"]
     r.add_argument("--reviewers", required=True,
-                   help="comma list; correctness and attacker are always added")
+                   help="comma list; correctness, attacker and smells are always added")
     r.add_argument("--model", default=os.environ.get("REVIEW_PANEL_MODEL"), required=not os.environ.get(
         "REVIEW_PANEL_MODEL"), help="reviewer model (env REVIEW_PANEL_MODEL)")
     r.add_argument("--implementer-model", help="the model that wrote the change; must differ")
