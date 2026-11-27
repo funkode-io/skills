@@ -348,7 +348,10 @@ def session_settings(a, sandboxed):
     command substitution in a path still reads any file: sandboxing them too is the open fix.
     """
     login = login_dir()
-    settings = {"permissions": {"deny": ["Read(/%s/**)" % login, "Edit(/%s/**)" % login]}}
+    # A command's output above this size is saved under the login directory, where no session may
+    # read it back; 128000 is the most Claude Code returns inline.
+    settings = {"permissions": {"deny": ["Read(/%s/**)" % login, "Edit(/%s/**)" % login]},
+                "bashOutputMaxChars": 128000}
     if sandboxed:
         caches = [os.path.expanduser(c) for c in CACHES if os.path.isdir(os.path.expanduser(c))]
         settings["sandbox"] = {
